@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: recon
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: recon
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - recon-postgres:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://recon:recon@postgres:5432/recon
+      RECON_TENANT_ID: demo-merchant
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - alembic upgrade head && uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+
+  web:
+    build:
+      context: apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  recon-postgres:
