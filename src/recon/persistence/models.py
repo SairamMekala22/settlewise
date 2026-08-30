@@ -162,6 +162,34 @@ class ReviewDecisionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class AIInvestigationRecord(Base):
+    __tablename__ = "ai_investigations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_investigation_id"),
+        Index(
+            "ix_ai_investigation_tenant_settlement_time", "tenant_id", "settlement_id", "created_at"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reconciliation_runs.id"), index=True)
+    external_investigation_id: Mapped[str] = mapped_column(String(72), index=True)
+    settlement_id: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(128))
+    prompt_template_version: Mapped[str] = mapped_column(String(64))
+    evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    response: Mapped[str] = mapped_column(Text)
+    response_hash: Mapped[str] = mapped_column(String(64))
+    actor: Mapped[str] = mapped_column(String(120))
+    tool_calls: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    fallback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempted_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempted_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AuditEventRecord(Base):
     __tablename__ = "audit_events"
     __table_args__ = (

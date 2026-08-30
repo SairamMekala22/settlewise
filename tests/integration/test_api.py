@@ -20,6 +20,20 @@ def test_demo_run_exposes_evidence_ai_and_review() -> None:
     analytics = client.get(f"/api/v1/reconciliation-runs/{run_id}/analytics")
     assert analytics.status_code == 200
     assert analytics.json()["evaluation"]["false_reconciled"] == 0
+    scorecard = analytics.json()["evaluation"]["scorecard"]
+    assert [item["metric"] for item in scorecard] == [
+        "precision_auto",
+        "forced_match_rate",
+        "recall_auto",
+        "link_precision_all_tiers",
+        "link_recall_all_tiers",
+        "exception_recall",
+        "exception_code_accuracy",
+        "exception_precision",
+        "value_coverage",
+    ]
+    assert all(0.0 <= item["value"] <= 1.0 for item in scorecard)
+    assert "expected_bank_by_settlement" not in str(analytics.json())
 
     outcomes = client.get(f"/api/v1/reconciliation-runs/{run_id}/outcomes").json()
     settlement_id = outcomes[0]["settlement_id"]
@@ -38,6 +52,16 @@ def test_demo_run_exposes_evidence_ai_and_review() -> None:
     assert answer.status_code == 200
     assert settlement_id in answer.json()["evidence_ids"]
     assert answer.json()["provider"] == "deterministic-evidence"
+    assert answer.json()["model"] == "local-rules"
+    ai_audit = client.get("/api/v1/audit-events", params={"subject_id": settlement_id})
+    assert ai_audit.json()[-1]["event_type"] == "AI_INVESTIGATION_RECORDED"
+    assert ai_audit.json()[-1]["details"]["prompt_template_version"]
+    assert ai_audit.json()[-1]["details"]["tool_calls"] == ["get_settlement_evidence"]
+    assert "question" not in ai_audit.json()[-1]["details"]
+
+    questions = client.get("/api/v1/ai/questions")
+    assert questions.status_code == 200
+    assert len(questions.json()["questions"]) == 3
 
     review = client.post(
         f"/api/v1/reconciliation-runs/{run_id}/settlements/{settlement_id}/reviews",

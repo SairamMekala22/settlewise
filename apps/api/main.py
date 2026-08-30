@@ -7,14 +7,17 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from recon.ai.controller import EvidenceController
+from recon.ai.gemini_provider import GeminiEvidenceProvider, HttpxGeminiTransport
+from recon.ai.openai_provider import HttpxOpenAITransport, OpenAIEvidenceProvider
+from recon.ai.tools import CURATED_FINANCE_QUESTIONS, EvidenceQueryTools
 from recon.application.service import ReconciliationApplication
 from recon.domain.models import OutcomeStatus
 from recon.ingestion.csv_adapter import load_exported_dataset
@@ -46,7 +49,29 @@ def _build_application() -> tuple[ReconciliationApplication, str]:
 
 
 application, persistence_mode = _build_application()
-controller = EvidenceController()
+
+
+def _build_controller() -> EvidenceController:
+    provider_name = os.environ.get("AI_PROVIDER", "disabled").strip().lower()
+    if provider_name in {"", "disabled", "deterministic"}:
+        return EvidenceController()
+    if provider_name == "openai":
+        openai_transport = HttpxOpenAITransport(os.environ.get("OPENAI_API_KEY", ""))
+        openai_provider = OpenAIEvidenceProvider(
+            os.environ.get("OPENAI_MODEL", "gpt-5.4-mini"), openai_transport
+        )
+        return EvidenceController(openai_provider)
+    if provider_name == "gemini":
+        gemini_transport = HttpxGeminiTransport(os.environ.get("GEMINI_API_KEY", ""))
+        gemini_provider = GeminiEvidenceProvider(
+            os.environ.get("GEMINI_MODEL", "gemini-3.6-flash"), gemini_transport
+        )
+        return EvidenceController(gemini_provider)
+    raise ValueError(f"unsupported AI_PROVIDER: {provider_name}")
+
+
+controller = _build_controller()
+evidence_tools = EvidenceQueryTools(application)
 
 
 class DemoRunRequest(BaseModel):
@@ -76,6 +101,7 @@ def health() -> dict[str, str]:
         "status": "ok",
         "ruleset": "RECON_RULESET_V1",
         "persistence": persistence_mode,
+        "ai_provider": controller.provider.name,
     }
 
 
@@ -170,7 +196,9 @@ def outcomes(
     status: Annotated[OutcomeStatus | None, Query()] = None,
 ) -> list[dict[str, object]]:
     try:
-        return jsonable_encoder(application.outcomes(run_id, status=status))
+        return cast(
+            list[dict[str, object]], jsonable_encoder(application.outcomes(run_id, status=status))
+        )
     except LookupError as exc:
         raise _not_found(exc) from exc
 
@@ -230,14 +258,42 @@ def review(run_id: str, settlement_id: str, request: ReviewRequest) -> dict[str,
 
 @app.get("/api/v1/audit-events")
 def audit_events(subject_id: str | None = None) -> list[dict[str, object]]:
-    return jsonable_encoder(application.audit_events(subject_id=subject_id))
+    return cast(
+        list[dict[str, object]],
+        jsonable_encoder(application.audit_events(subject_id=subject_id)),
+    )
 
 
 @app.post("/api/v1/ai/queries")
-def ai_query(request: AIQueryRequest) -> dict[str, object]:
+def ai_query(
+    request: AIQueryRequest,
+    actor: Annotated[str, Header(alias="X-Actor")] = "demo-investigator",
+) -> dict[str, object]:
     try:
-        evidence = application.evidence(request.run_id, request.settlement_id)
+        tool_result = evidence_tools.settlement_evidence(request.run_id, request.settlement_id)
+        evidence = tool_result.evidence
         answer = controller.answer(request.question, evidence)
+        application.record_ai_investigation(
+            request.run_id,
+            request.settlement_id,
+            question=request.question,
+            evidence=evidence,
+            provider=answer.provider,
+            model=answer.model,
+            prompt_template_version=answer.prompt_template_version,
+            evidence_ids=answer.evidence_ids,
+            response=answer.answer,
+            actor=actor,
+            fallback_reason=answer.fallback_reason,
+            attempted_provider=answer.attempted_provider,
+            attempted_model=answer.attempted_model,
+            tool_calls=tool_result.tool_calls,
+        )
         return asdict(answer)
     except LookupError as exc:
         raise _not_found(exc) from exc
+
+
+@app.get("/api/v1/ai/questions")
+def ai_questions() -> dict[str, tuple[str, ...]]:
+    return {"questions": CURATED_FINANCE_QUESTIONS}

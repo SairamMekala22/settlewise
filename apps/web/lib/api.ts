@@ -6,6 +6,13 @@ export type OutcomeStatus =
   | "REQUIRES_REVIEW"
   | "INVALID_DATA";
 
+export interface EvaluationMetric {
+  metric: string;
+  value: number;
+  detail: string;
+  target: number | null;
+}
+
 export interface Analytics {
   run_id: string;
   currency: string;
@@ -24,6 +31,7 @@ export interface Analytics {
     auto_reconcile_precision: number;
     false_reconciled: number;
     correct_outcomes: number;
+    scorecard: EvaluationMetric[];
   } | null;
 }
 
@@ -118,7 +126,17 @@ export function getEvidence(runId: string, settlementId: string) {
 }
 
 export function askController(runId: string, settlementId: string, question: string) {
-  return request<{ answer: string; evidence_ids: string[]; provider: string; advisory: boolean }>(
+  return request<{
+    answer: string;
+    evidence_ids: string[];
+    provider: string;
+    model: string;
+    advisory: boolean;
+    requires_human_review: boolean;
+    fallback_reason: string | null;
+    attempted_provider: string | null;
+    attempted_model: string | null;
+  }>(
     "/ai/queries",
     {
       method: "POST",
@@ -126,4 +144,3 @@ export function askController(runId: string, settlementId: string, question: str
     },
   );
 }
-

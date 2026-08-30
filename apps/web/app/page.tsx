@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Fragment, useMemo, useState } from "react";
+import Image from "next/image";
 import {
   Analytics,
   Evidence,
@@ -39,6 +40,7 @@ export default function Dashboard() {
   const [analytics, setAnalytics] = useState<Analytics>();
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
   const [selected, setSelected] = useState<Evidence>();
+  const [loadingSettlementId, setLoadingSettlementId] = useState<string>();
   const [filter, setFilter] = useState<OutcomeStatus | "ALL">("ALL");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -74,8 +76,22 @@ export default function Dashboard() {
 
   async function openSettlement(settlementId: string) {
     if (!runId) return;
+    if (selected?.subject.id === settlementId) {
+      setSelected(undefined);
+      setAnswer(undefined);
+      return;
+    }
     setAnswer(undefined);
-    setSelected(await getEvidence(runId, settlementId));
+    setError(undefined);
+    setSelected(undefined);
+    setLoadingSettlementId(settlementId);
+    try {
+      setSelected(await getEvidence(runId, settlementId));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to load settlement evidence");
+    } finally {
+      setLoadingSettlementId(undefined);
+    }
   }
 
   async function ask(event: FormEvent) {
@@ -84,7 +100,12 @@ export default function Dashboard() {
     setBusy(true);
     try {
       const response = await askController(runId, selected.subject.id, question);
-      setAnswer(`${response.answer}\n\nEvidence: ${response.evidence_ids.join(", ")}`);
+      const review = response.requires_human_review ? "Human review required" : "No review flag";
+      const fallback = response.fallback_reason ? `\nFallback: ${response.fallback_reason}` : "";
+      const attempted = response.attempted_provider
+        ? `\nAttempted: ${response.attempted_provider} · ${response.attempted_model}`
+        : "";
+      setAnswer(`${response.answer}\n\nEvidence: ${response.evidence_ids.join(", ")}\nSource: ${response.provider} · ${response.model}\n${review}${attempted}${fallback}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Controller query failed");
     } finally {
@@ -96,8 +117,10 @@ export default function Dashboard() {
     <main>
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">S</span>
-          <div><strong>Settlewise</strong><small>Finance control</small></div>
+          <span className="brand-mark" aria-hidden="true">
+            <Image src="/brand/settlewise-mark.png" alt="" width={39} height={39} priority />
+          </span>
+          <div><strong>SETTLEWISE</strong><small>Finance control</small></div>
         </div>
         <div className="top-actions">
           <span className="system-state"><i /> Deterministic engine</span>
@@ -132,7 +155,7 @@ export default function Dashboard() {
 
           {!analytics ? (
             <section className="empty-state">
-              <div className="empty-icon">₹</div>
+              <div className="empty-icon"><Image src="/brand/settlewise-mark.png" alt="" width={96} height={96} priority /></div>
               <h2>Your evidence workspace is ready</h2>
               <p>Generate 500 merchant orders, reconcile every settlement, inject realistic exceptions, and score the result against hidden truth.</p>
               <button className="primary large" onClick={startDemo} disabled={busy}>Run the 500-order demo</button>
@@ -150,13 +173,25 @@ export default function Dashboard() {
               <section className="workspace" id="settlements">
                 <div className="table-panel">
                   <div className="panel-head"><div><h2>Settlement workbench</h2><p>Expected, reported, and bank values remain separate.</p></div><select value={filter} onChange={(event) => setFilter(event.target.value as OutcomeStatus | "ALL")} aria-label="Filter settlements"><option value="ALL">All statuses</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
-                  <div className="table-wrap"><table><thead><tr><th>Settlement</th><th>Gross</th><th>Fees + tax</th><th>Expected net</th><th>Delta</th><th>Status</th><th>Confidence</th></tr></thead><tbody>{filtered.map((item) => <tr key={item.settlement_id} onClick={() => openSettlement(item.settlement_id)} className={selected?.subject.id === item.settlement_id ? "selected" : ""}><td><button className="text-button">{item.settlement_id}</button></td><td>{money(item.calculation.payment_credits_minor)}</td><td className="negative">−{money(item.calculation.fees_minor + item.calculation.tax_minor)}</td><td>{money(item.calculation.expected_net_minor)}</td><td className={item.calculation.gateway_delta_minor ? "negative" : "muted"}>{money(item.calculation.gateway_delta_minor)}</td><td><span className={`status ${item.status.toLowerCase()}`}>{STATUS_LABELS[item.status]}</span></td><td><span className={`confidence ${item.confidence.toLowerCase()}`}>{item.confidence}</span></td></tr>)}</tbody></table></div>
+                  <div className="table-wrap"><table><thead><tr><th>Settlement</th><th>Gross</th><th>Fees + tax</th><th>Expected net</th><th>Delta</th><th>Status</th><th>Confidence</th></tr></thead><tbody>{filtered.map((item) => {
+                    const isSelected = selected?.subject.id === item.settlement_id;
+                    const isLoading = loadingSettlementId === item.settlement_id;
+                    return <Fragment key={item.settlement_id}>
+                      <tr onClick={() => openSettlement(item.settlement_id)} className={isSelected ? "selected" : ""} aria-expanded={isSelected}>
+                        <td><button className="text-button" aria-label={`${isSelected ? "Hide" : "Show"} details for ${item.settlement_id}`} aria-expanded={isSelected}>{item.settlement_id}<span className="row-chevron" aria-hidden="true">{isSelected ? "⌃" : "⌄"}</span></button></td>
+                        <td>{money(item.calculation.payment_credits_minor)}</td>
+                        <td className="negative">−{money(item.calculation.fees_minor + item.calculation.tax_minor)}</td>
+                        <td>{money(item.calculation.expected_net_minor)}</td>
+                        <td className={item.calculation.gateway_delta_minor ? "negative" : "muted"}>{money(item.calculation.gateway_delta_minor)}</td>
+                        <td><span className={`status ${item.status.toLowerCase()}`}>{STATUS_LABELS[item.status]}</span></td>
+                        <td><span className={`confidence ${item.confidence.toLowerCase()}`}>{item.confidence}</span></td>
+                      </tr>
+                      {isLoading && <tr className="inline-detail-row"><td colSpan={7}><div className="inline-detail-loading" role="status">Loading settlement evidence…</div></td></tr>}
+                      {isSelected && <tr className="inline-detail-row"><td colSpan={7}><div className="inline-detail" aria-live="polite"><SettlementDetail evidence={selected} /></div></td></tr>}
+                    </Fragment>;
+                  })}</tbody></table></div>
                   <div className="table-foot">Showing {filtered.length} of {outcomes.length} settlements <span>Generated live from seed 20260825</span></div>
                 </div>
-
-                <aside className="detail-panel" aria-live="polite">
-                  {selected ? <SettlementDetail evidence={selected} /> : <p>Select a settlement to inspect its evidence.</p>}
-                </aside>
               </section>
 
               <section className="controller" id="controller">
@@ -165,9 +200,40 @@ export default function Dashboard() {
                 {answer && <pre className="answer">{answer}</pre>}
               </section>
 
-              <section className="proof" id="evaluation">
-                <div><p className="eyebrow">GROUND-TRUTH EVALUATION</p><h2>Trust is measured, not claimed.</h2></div>
-                <div className="proof-grid"><div><strong>{analytics.evaluation?.correct_outcomes ?? "—"}/{analytics.settlement_count}</strong><span>Correct outcomes</span></div><div><strong>{analytics.evaluation ? percent(analytics.evaluation.outcome_accuracy) : "—"}</strong><span>Outcome accuracy</span></div><div><strong>{analytics.evaluation?.false_reconciled ?? "—"}</strong><span>False reconciliations</span></div></div>
+              <section className="scorecard" id="evaluation">
+                <div className="scorecard-head">
+                  <div>
+                    <p className="eyebrow">GROUND-TRUTH EVALUATION</p>
+                    <h2>The baseline, honestly measured.</h2>
+                    <p>Deterministic scores calculated from hidden synthetic truth—not model opinion.</p>
+                  </div>
+                  <div className="scorecard-summary" aria-label="Evaluation summary">
+                    <span><strong>{analytics.evaluation?.correct_outcomes ?? "—"}/{analytics.settlement_count}</strong> correct outcomes</span>
+                    <span><strong>{analytics.evaluation?.false_reconciled ?? "—"}</strong> false reconciliations</span>
+                  </div>
+                </div>
+                {analytics.evaluation ? (
+                  <div className="evaluation-table-wrap">
+                    <table className="evaluation-table">
+                      <caption>Ground-truth reconciliation evaluation metrics</caption>
+                      <thead><tr><th>Metric</th><th>Value</th><th>Interpretation</th></tr></thead>
+                      <tbody>
+                        {analytics.evaluation.scorecard.map((item) => (
+                          <tr key={item.metric}>
+                            <td><code>{item.metric}</code></td>
+                            <td className="metric-value">{item.value.toFixed(3)}</td>
+                            <td>
+                              {item.target !== null && <span className="metric-target">target {item.target.toFixed(3)}</span>}
+                              <span>{item.detail}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="scorecard-empty">This imported run has no evaluator-only ground truth, so no score is claimed.</div>
+                )}
               </section>
             </>
           )}
@@ -187,4 +253,3 @@ function SettlementDetail({ evidence }: { evidence: Evidence }) {
     <div className="lineage"><span>{evidence.source_refs.length} ledger lines</span><span>{evidence.outcome.confidence} confidence</span><span>Rule evidence stored</span></div>
   </>;
 }
-

@@ -31,7 +31,7 @@ from recon.domain.models import (
     SettlementLedgerLine,
     SettlementStatus,
 )
-from recon.evaluation.metrics import EvaluationReport
+from recon.evaluation.metrics import EvaluationMetric, EvaluationReport
 from recon.synthetic.generator import GeneratedDataset, GeneratorConfig, GroundTruth
 
 if TYPE_CHECKING:
@@ -312,6 +312,20 @@ def decode_snapshot(payload: JsonObject) -> RunSnapshot:
             exception_recall=float(str(evaluation_data["exception_recall"])),
             expected_commercial_exceptions=_int(evaluation_data["expected_commercial_exceptions"]),
             detected_commercial_exceptions=_int(evaluation_data["detected_commercial_exceptions"]),
+            scorecard=tuple(
+                EvaluationMetric(
+                    metric=str(item["metric"]),
+                    value=float(str(item["value"])),
+                    detail=str(item["detail"]),
+                    target=(
+                        float(str(item["target"])) if item.get("target") is not None else None
+                    ),
+                )
+                for item in (
+                    cast(JsonObject, raw_item)
+                    for raw_item in cast(list[object], evaluation_data.get("scorecard", []))
+                )
+            ),
         )
     return RunSnapshot(
         str(payload["run_id"]),

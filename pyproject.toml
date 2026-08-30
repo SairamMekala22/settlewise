@@ -8,23 +8,23 @@ version = "0.1.0"
 description = "Deterministic Razorpay settlement reconciliation with evidence-grounded AI explanations"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-  "alembic>=1.14,<2",
-  "fastapi>=0.115,<1",
-  "pydantic>=2.10,<3",
-  "psycopg[binary]>=3.2,<4",
-  "python-multipart>=0.0.18,<1",
-  "sqlalchemy>=2.0,<3",
-  "uvicorn[standard]>=0.34,<1",
+  "alembic==1.19.1",
+  "fastapi==0.141.1",
+  "httpx==0.28.1",
+  "pydantic==2.13.4",
+  "psycopg[binary]==3.3.4",
+  "python-multipart==0.0.32",
+  "sqlalchemy==2.0.52",
+  "uvicorn[standard]==0.52.4",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1",
-  "hypothesis>=6.120,<7",
-  "mypy>=1.14,<2",
-  "pytest>=8.3,<9",
-  "pytest-cov>=6,<7",
-  "ruff>=0.9,<1",
+  "hypothesis==6.165.10",
+  "mypy==1.20.2",
+  "pytest==8.4.2",
+  "pytest-cov==6.3.0",
+  "ruff==0.16.4",
 ]
 
 [project.scripts]
@@ -47,5 +47,4 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["recon"]
-
+files = ["src/recon", "apps/api"]

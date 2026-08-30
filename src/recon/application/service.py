@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import RLock
@@ -38,6 +40,28 @@ class ReviewDecision:
     created_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class AIInvestigation:
+    """Append-only metadata for one advisory, evidence-bounded investigation."""
+
+    investigation_id: str
+    run_id: str
+    settlement_id: str
+    provider: str
+    model: str
+    prompt_template_version: str
+    evidence_ids: tuple[str, ...]
+    input_hash: str
+    response: str
+    response_hash: str
+    actor: str
+    created_at: datetime
+    tool_calls: tuple[str, ...] = ()
+    fallback_reason: str | None = None
+    attempted_provider: str | None = None
+    attempted_model: str | None = None
+
+
 @dataclass(slots=True)
 class RunSnapshot:
     run_id: str
@@ -56,6 +80,7 @@ class ReconciliationApplication:
         self._runs: dict[str, RunSnapshot] = {}
         self._audits: list[AuditEvent] = []
         self._reviews: list[ReviewDecision] = []
+        self._investigations: list[AIInvestigation] = []
         self._lock = RLock()
         self._repository = repository
 
@@ -210,3 +235,77 @@ class ReconciliationApplication:
         return [
             item for item in self._audits if subject_id is None or item.subject_id == subject_id
         ]
+
+    def record_ai_investigation(
+        self,
+        run_id: str,
+        settlement_id: str,
+        *,
+        question: str,
+        evidence: dict[str, object],
+        provider: str,
+        model: str,
+        prompt_template_version: str,
+        evidence_ids: tuple[str, ...],
+        response: str,
+        actor: str,
+        fallback_reason: str | None,
+        attempted_provider: str | None,
+        attempted_model: str | None,
+        tool_calls: tuple[str, ...],
+    ) -> AIInvestigation:
+        """Record advisory output and provenance without retaining the raw question prompt."""
+        self.outcome(run_id, settlement_id)
+        canonical_input = json.dumps(
+            {"question": question, "evidence": evidence},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        created_at = datetime.now(UTC)
+        investigation = AIInvestigation(
+            investigation_id=f"investigation_{uuid4().hex}",
+            run_id=run_id,
+            settlement_id=settlement_id,
+            provider=provider,
+            model=model,
+            prompt_template_version=prompt_template_version,
+            evidence_ids=evidence_ids,
+            input_hash=hashlib.sha256(canonical_input.encode()).hexdigest(),
+            response=response,
+            response_hash=hashlib.sha256(response.encode()).hexdigest(),
+            actor=actor,
+            created_at=created_at,
+            tool_calls=tool_calls,
+            fallback_reason=fallback_reason,
+            attempted_provider=attempted_provider,
+            attempted_model=attempted_model,
+        )
+        ai_involved = provider != "deterministic-evidence" or attempted_provider is not None
+        audit_event = AuditEvent(
+            event_id=f"audit_{uuid4().hex}",
+            timestamp=created_at,
+            event_type="AI_INVESTIGATION_RECORDED",
+            subject_id=settlement_id,
+            actor=actor,
+            details={
+                "investigation_id": investigation.investigation_id,
+                "run_id": run_id,
+                "provider": provider,
+                "model": model,
+                "prompt_template_version": prompt_template_version,
+                "evidence_ids": list(evidence_ids),
+                "input_hash": investigation.input_hash,
+                "response_hash": investigation.response_hash,
+                "tool_calls": list(tool_calls),
+                "fallback_reason": fallback_reason,
+                "attempted_provider": attempted_provider,
+                "attempted_model": attempted_model,
+            },
+            ai_involved=ai_involved,
+        )
+        if self._repository is not None:
+            self._repository.save_ai_investigation(investigation, audit_event)
+        with self._lock:
+            self._investigations.append(investigation)
+            self._audits.append(audit_event)
+        return investigation

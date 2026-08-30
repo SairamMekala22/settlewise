@@ -10,10 +10,11 @@ from typing import cast
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from recon.application.service import AuditEvent, ReviewDecision, RunSnapshot
+from recon.application.service import AIInvestigation, AuditEvent, ReviewDecision, RunSnapshot
 from recon.evidence.builder import build_settlement_evidence
 from recon.persistence.codec import decode_snapshot, encode_snapshot
 from recon.persistence.models import (
+    AIInvestigationRecord,
     AuditEventRecord,
     OutcomeRecord,
     ReconciliationRunRecord,
@@ -176,7 +177,7 @@ class PostgresRunRepository:
             return [
                 AuditEvent(
                     event_id=str(row.id),
-                    timestamp=row.created_at,
+                    timestamp=row.created_at.astimezone(UTC),
                     event_type=row.event_type,
                     subject_id=row.subject_id,
                     actor=row.actor,
@@ -185,3 +186,40 @@ class PostgresRunRepository:
                 )
                 for row in rows
             ]
+
+    def save_ai_investigation(
+        self, investigation: AIInvestigation, audit_event: AuditEvent
+    ) -> None:
+        """Append one AI advisory and audit record within its tenant and run."""
+        with self._sessions.begin() as session:
+            tenant = self._tenant(session)
+            run = session.scalar(
+                select(ReconciliationRunRecord).where(
+                    ReconciliationRunRecord.tenant_id == tenant.id,
+                    ReconciliationRunRecord.external_run_id == investigation.run_id,
+                )
+            )
+            if run is None:
+                raise LookupError(f"unknown run: {investigation.run_id}")
+            session.add(
+                AIInvestigationRecord(
+                    tenant_id=tenant.id,
+                    run_id=run.id,
+                    external_investigation_id=investigation.investigation_id,
+                    settlement_id=investigation.settlement_id,
+                    provider=investigation.provider,
+                    model=investigation.model,
+                    prompt_template_version=investigation.prompt_template_version,
+                    evidence_ids=list(investigation.evidence_ids),
+                    input_hash=investigation.input_hash,
+                    response=investigation.response,
+                    response_hash=investigation.response_hash,
+                    actor=investigation.actor,
+                    tool_calls=list(investigation.tool_calls),
+                    fallback_reason=investigation.fallback_reason,
+                    attempted_provider=investigation.attempted_provider,
+                    attempted_model=investigation.attempted_model,
+                    created_at=investigation.created_at,
+                )
+            )
+            session.add(self._audit_record(tenant, audit_event))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from recon.application.service import AuditEvent, ReviewDecision, RunSnapshot
+    from recon.application.service import AIInvestigation, AuditEvent, ReviewDecision, RunSnapshot
 
 
 class RunRepository(Protocol):
@@ -29,4 +29,10 @@ class RunRepository(Protocol):
 
     def audit_events(self, subject_id: str | None = None) -> list[AuditEvent]:
         """Load append-only audit events within the configured tenant."""
+        ...
+
+    def save_ai_investigation(
+        self, investigation: AIInvestigation, audit_event: AuditEvent
+    ) -> None:
+        """Append an advisory investigation and its audit event atomically."""
         ...

@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.env
+.env.*
+.coverage
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+**/__pycache__
+**/*.pyc
+apps/web/.next
+apps/web/node_modules
+data/generated/*
+!data/generated/.gitkeep

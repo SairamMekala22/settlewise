@@ -39,12 +39,11 @@ See [the approved architecture](docs/architecture.md), [implementation plan](doc
 
 ## Local setup
 
-Requires Python 3.12, Node.js 22+, and optionally Docker for PostgreSQL.
+Requires Python 3.12, Node.js 22+, `uv`, and optionally Docker for PostgreSQL.
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-cd apps/web && npm install && cd ../..
+uv sync --frozen --extra dev
+cd apps/web && npm ci && cd ../..
 ```
 
 Run the deterministic backend and dashboard in separate terminals. Without `DATABASE_URL`,
@@ -89,7 +88,7 @@ The current reference seed produces 500 orders and 48 settlement batches. Its ou
 
 ```bash
 .venv/bin/ruff check src apps/api tests migrations
-.venv/bin/mypy src/recon
+.venv/bin/mypy
 .venv/bin/pytest --cov=src/recon
 cd apps/web && npm run lint && npm run build && npm audit
 ```
@@ -109,4 +108,12 @@ payment, and refund facts are currently retained inside the immutable JSONB snap
 settlement outcomes remain separately indexed. Fully normalized query tables for every source fact
 are a later reporting optimization; they do not affect deterministic replay or durability.
 
-The local controller is a deterministic evidence narrator. A remote model can be added behind `AIProvider`, but it must receive only redacted evidence, return resolvable citations, and retain no write path.
+The controller defaults to the deterministic evidence narrator. To enable an external provider, set
+either `AI_PROVIDER=gemini` with `GEMINI_API_KEY` and optionally `GEMINI_MODEL`, or
+`AI_PROVIDER=openai` with `OPENAI_API_KEY` and optionally `OPENAI_MODEL`. Gemini uses a stateless
+single-turn GenerateContent request; OpenAI uses the Responses API with `store=false`. Both adapters
+send only the bounded redacted evidence bundle, request structured output with no tools, reject
+unknown citations and unsupported numbers, and fall back to the local narrator on a safe provider
+failure. Every answer is advisory and creates an append-only investigation/audit record containing
+provider, model, prompt-template version, evidence IDs, input/response hashes, actor, and timestamp;
+the raw question, API key, and model reasoning are not retained.

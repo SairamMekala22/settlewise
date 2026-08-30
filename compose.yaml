@@ -22,6 +22,11 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://recon:recon@postgres:5432/recon
       RECON_TENANT_ID: demo-merchant
+      AI_PROVIDER: ${AI_PROVIDER:-disabled}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
     ports:
       - "8000:8000"
     depends_on:
